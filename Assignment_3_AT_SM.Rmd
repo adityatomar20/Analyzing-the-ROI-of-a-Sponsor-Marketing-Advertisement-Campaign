@@ -1,0 +1,196 @@
+---
+title: "Assignment 3_MSBA_6441_Causal Inference via Econometrics and Experimentation_AT_SM"
+author: "Aditya Tomar, Shubham Midha"
+output: pdf_document
+date: "2022-11-21"
+---
+
+## (a)	What is Wrong with Bob’s RoI Calculation? 
+
+Keyword searches include the name of the company.
+These people most likely would already be aware of the website and would be
+actively looking for it. 
+
+For example: if a consumer used the search term “Bazaar shoes” and clicked 
+on the sponsored ad that came up in the results. If the ad weren’t there, 
+the consumer would very likely click on organic link and company wouldn't even
+have to pay for the click cost for sponsored ads.
+
+Also, it is mentioned in the case that the conversion probability and margin 
+per conversion are the same for all consumers, irrespective of how they land
+at the website.
+
+Hence for calculating the ROI of the sponsored campaign, we need to find out
+how many conversions can truly be attributed to sponsored ads.
+
+## (b) Define the Treatment and Control: 
+Platform is the unit of observation as the sponsored ads ran on Google
+(goog) for Weeks 1 - 9 and got stopped because of the technical glitch
+for Weeks 10 - 12.
+
+Treatment is stopping of sponsored ads post week 9 for Google.
+
+Treatment group: Google - Week 10, 11 & 12
+Control groups: Yahoo, Bing, and Ask
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Loading the data
+```{r}
+library(dplyr)
+library(ggplot2)
+library(plm)
+library(readr)
+
+# import data
+data = read_csv("did_sponsored_ads.csv")
+```
+
+### Exploring and checking for number of weeks
+```{r}
+# Data Exploration
+
+# How many weeks does the data cover? 
+# What is the minimum and maximum week in the data? 
+
+min(data$week)
+max(data$week)
+
+```
+Data is for 12 weeks
+
+### Manipulating Data and adding additional treatment/control columns
+```{r}
+# Adding sponsored and organic traffic to compute total web traffic
+data$total_traffic = data$avg_spons + data$avg_org
+
+# Adding treatment variable - 1 for week 10, week 11, and week 12; 0 for rest
+# Only for Google
+
+data = data %>%
+  mutate(treatment = ifelse((week>9 & platform=='goog'), 1,0))
+
+# Adding a variable for indicating post period 
+data = data %>%
+  mutate(post_flag = ifelse((week>9), 1,0))
+
+# Adding a flag for Google
+data = data %>%
+  mutate(google_flag = ifelse((platform=='goog'), 1,0))
+```
+
+
+## (c)	Consider a First Difference Estimate: 
+
+Simply observing the treated unit (Google) by calculating first  difference
+that  is,  the  %  change  in  web  traffic  arriving from Google; 
+(after – before) / before
+This estimate is the pre-post difference in the treated cohort;
+
+Problem: However, this approach assumes that the first nine weeks were 
+systematically similar to the last three weeks
+
+```{r}
+google_data = data %>% filter(platform == 'goog')
+
+hist(google_data$total_traffic,breaks=10)
+
+summary(lm(total_traffic ~ treatment, data=google_data))
+```
+
+Problem: However, this approach assumes that the first nine weeks were 
+systematically similar to the last three weeks
+This is not the case as we can see a clear uptrend and hence we should control
+for the variation in weeks or try difference in differences method.
+
+Also the p-value for the coefficients is 0.576 which is above our acceptable
+threshold of 0.05, hence we cannot interpret the coefficient meaningfully
+
+## (d) Calculate the Difference-in-Differences
+
+```{r}
+bing_data = data %>% filter(platform == 'bing')
+yahoo_data = data %>% filter(platform == 'yahoo')
+ask_data = data %>% filter(platform == 'ask')
+
+# Before running DiD, we need to check for parallel trend assumption in 
+# pre-period
+
+ggplot(google_data, aes(x=week, y= total_traffic, color = 'Google')) +
+  geom_line() +
+  geom_line(aes(x=week, y= total_traffic, color = 'Bing'), data = bing_data) +
+  geom_line(aes(x=week, y= total_traffic, color = 'Yahoo'), data = yahoo_data) +
+  geom_line(aes(x=week, y= total_traffic, color = 'Ask'), data = ask_data) +
+  geom_vline(xintercept = 9,color='black') +
+  scale_x_continuous(breaks = seq(1, 12, by = 1)) +
+  labs(y = "Total Traffic", x = "Week") +
+  theme_classic()
+```
+
+```{r}
+# Evaluating parallel trends assumption
+summary(lm(total_traffic ~ google_flag*factor(week), data=data))
+```
+Since we observe statistically significant coefficients for a few weeks prior
+to week 9, our parallel trends assumptions is violated
+
+```{r}
+# Performing the DiD
+did <- lm(total_traffic ~ google_flag + post_flag + google_flag * post_flag, data=data)
+summary(did)
+```
+
+From the results obtained, we can say that due to the technical glitch causing 
+the absence of Google sponsored ads, there is a decrease of 9910 clicks 
+for the Google platform. 
+In terms of statistical significance, the p-value(0.007) is lower than the the
+threshold of 0.05, implying that it is statistically significant.
+
+This confirms our hypothesis that there might be few users who would visit the 
+website via organic links in the absence of sponsored ads, however we would lose
+few customers too.
+
+## (e) Given Your Treatment Effect Estimate, Fix Bob’s RoI Calculation
+
+The ROI calculation that was calculated by Bob had the following metrics:
+An average revenue per click of 0.12 x 21, or $2.52, which implies an ROI of
+(2.52– 0.60)/(0.60), or 320.0%.
+
+The discussion revolves Bob and Myra where the latter suggests that they can 
+save money by showing the ads only to relevant people. The keywords searches
+already include names of bazaar.com, which means that users were aware of what
+they were searching - which makes them discuss if they even need to show ads to 
+the users.
+
+```{r}
+# regressing the average organic clicks for the treatment, pre_post
+organic <- lm(avg_org ~ google_flag + post_flag + google_flag * post_flag, data=data)
+summary(organic)
+```
+First, out of all the traffic, we first calculate the proportion of true traffic:
+By this we mean that we want to find the proportion of clicks truly motivated 
+by sponsored ad between it and clicks by customers who would still 
+visit Bazaar.com irrespective of sponsored ads.
+
+Looking at our co-efficient we obtained: 
+X = 9,910 (clicks truly motivated by sponsored ad)
+Y = 2,293.2 (clicks by customers who would still 
+visit Bazaar.com irrespective of sponsored ads)
+
+Proportion of true traffic = X/(X+Y) = 9,910/(9,910+2,293) = 0.8120954 (81%)
+
+We know calculate the new return of investment:
+```{r}
+New_ROI = ((21 * 0.12 * 0.8120954- 0.6)/0.6)*100
+New_ROI
+```
+
+With respect to the new estimated treatment effect, the new ROI is 241.08%.
+
+
+Without the wrong expansion of supported promotion income, the recently 
+determined return on initial capital investment of 320% is diminished to 241%,
+which is as yet a decent profit.
